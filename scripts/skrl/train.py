@@ -41,6 +41,12 @@ parser.add_argument("--checkpoint", type=str, default=None, help="Path to model 
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
 parser.add_argument("--export_io_descriptors", action="store_true", default=False, help="Export IO descriptors.")
 parser.add_argument(
+    "--motion_file",
+    type=str,
+    default=None,
+    help="Path to reference motion data file for AMP training (.pkl or .npy)",
+)
+parser.add_argument(
     "--ml_framework",
     type=str,
     default="torch",
@@ -77,8 +83,10 @@ import os
 import random
 from datetime import datetime
 
+import numpy as np
 import omni
 import skrl
+import torch
 from packaging import version
 
 # check for minimum supported skrl version
@@ -212,9 +220,89 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # wrap around environment for skrl
     env = SkrlVecEnvWrapper(env, ml_framework=args_cli.ml_framework)  # same as: `wrap_env(env, wrapper="auto")`
 
+    # load reference motion data for AMP training
+    motion_data = None
+    if algorithm == "amp" and args_cli.motion_file:
+        print(f"[INFO] Loading reference motion data from: {args_cli.motion_file}")
+        try:
+            from pathlib import Path
+
+            motion_file = Path(args_cli.motion_file)
+            if motion_file.suffix == ".npy":
+                motion_data = np.load(motion_file)
+            elif motion_file.suffix == ".pkl":
+                import pickle
+
+                with open(motion_file, "rb") as f:
+                    data = pickle.load(f)
+                    # 提取状态数据
+                    if "states" in data:
+                        motion_data = data["states"]
+                    elif "joint_positions" in data:
+                        # 如果只有关节位置，需要构建完整状态
+                        joint_pos = data["joint_positions"]
+                        joint_vel = data.get("joint_velocities", np.zeros_like(joint_pos))
+                        # 简化：只使用关节位置和速度
+                        motion_data = np.concatenate([joint_pos, joint_vel], axis=-1)
+                    else:
+                        motion_data = data
+            else:
+                raise ValueError(f"Unsupported motion file format: {motion_file.suffix}")
+
+            print(f"[INFO] Loaded motion data shape: {motion_data.shape}")
+
+        except Exception as e:
+            print(f"[WARNING] Failed to load motion data: {e}")
+            print("[WARNING] Continuing without reference motion data.")
+            motion_data = None
+
     # configure and instantiate the skrl runner
     # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
     runner = Runner(env, agent_cfg)
+
+    # load motion data into AMP agent's motion_dataset (if AMP and motion data provided)
+    if algorithm == "amp" and motion_data is not None:
+        try:
+            # 尝试将动作数据加载到AMP agent的motion_dataset
+            if hasattr(runner.agent, "motion_dataset") and runner.agent.motion_dataset is not None:
+                # 获取观察空间维度
+                obs_dim = env.observation_space.shape[-1] if hasattr(env.observation_space, "shape") else None
+
+                if obs_dim is not None and motion_data.shape[-1] != obs_dim:
+                    print(
+                        f"[WARNING] Motion data dimension ({motion_data.shape[-1]}) "
+                        f"does not match observation space ({obs_dim}). "
+                        "Attempting to pad or truncate..."
+                    )
+                    # 调整维度
+                    if motion_data.shape[-1] < obs_dim:
+                        # 填充
+                        pad_width = ((0, 0), (0, obs_dim - motion_data.shape[-1]))
+                        motion_data = np.pad(motion_data, pad_width, mode="constant")
+                    else:
+                        # 截断
+                        motion_data = motion_data[:, :obs_dim]
+
+                # 将数据添加到motion_dataset
+                # 注意：skrl的RandomMemory使用add方法
+                if hasattr(runner.agent.motion_dataset, "add"):
+                    for state in motion_data:
+                        # 转换为torch tensor
+                        state_tensor = torch.from_numpy(state).float()
+                        if args_cli.ml_framework.startswith("torch"):
+                            runner.agent.motion_dataset.add(state_tensor)
+                        else:
+                            # 对于JAX，需要转换
+                            import jax.numpy as jnp
+
+                            state_jax = jnp.array(state)
+                            runner.agent.motion_dataset.add(state_jax)
+                    print(f"[INFO] Loaded {len(motion_data)} motion samples into AMP motion_dataset.")
+                else:
+                    print("[WARNING] motion_dataset does not have 'add' method. Skipping data loading.")
+        except Exception as e:
+            print(f"[WARNING] Failed to load motion data into agent: {e}")
+            print("[WARNING] Continuing training without reference motion data.")
 
     # load checkpoint (if specified)
     if resume_path:

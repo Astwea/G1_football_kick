@@ -1,0 +1,15 @@
+# Requirements for G1 Kick AMP Training System
+# 
+# Note: Isaac Lab and its dependencies require NumPy < 2.0
+# Some packages (like nlopt) are compiled against NumPy 1.x and will not work with NumPy 2.x
+
+# Core dependencies
+numpy<2.0  # Required for Isaac Lab compatibility
+mediapipe>=0.10.0  # For video pose extraction
+opencv-python>=4.5.0  # For video processing
+scipy>=1.7.0  # For numerical computations
+
+# Optional: If using JAX backend for skrl
+# jax>=0.4.0
+# jaxlib>=0.4.0
+
