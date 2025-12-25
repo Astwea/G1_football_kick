@@ -44,28 +44,44 @@ class G1KickEnv(DirectRLEnv):
                 f"错误: {e}"
             )
 
-        # 计算实际的观察空间维度并更新配置
-        # 观察空间：关节位置 + 关节速度 + 根位置(3) + 根旋转(4) + 根线速度(3) + 根角速度(3) + 球相对位置(3) + 球速度(3)
-        actual_obs_dim = self.robot.num_joints * 2 + 3 + 4 + 3 + 3 + 3 + 3
-        if self.cfg.observation_space == 0 or self.cfg.observation_space != actual_obs_dim:
-            # 更新配置中的观察空间维度
-            self.cfg.observation_space = actual_obs_dim
-            print(f"[INFO] 观察空间维度已更新为: {actual_obs_dim} (基于{self.robot.num_joints}个关节)")
-
-        # 确保观察空间正确设置（用于AMP训练）
-        # AMP使用相同的观察空间作为状态空间
-        if hasattr(self, "observation_space") and self.observation_space is not None:
-            # 如果observation_space已经初始化，确保其形状正确
-            if hasattr(self.observation_space, "shape") and self.observation_space.shape[0] == 0:
-                # 如果观察空间形状为0，需要重新设置
-                import gymnasium.spaces as spaces
+        # 验证观察空间和动作空间维度
+        # 观察空间：关节位置(29) + 关节速度(29) + 根位置(3) + 根旋转(4) + 根线速度(3) + 根角速度(3) 
+        #          + 球绝对位置(3) + 球相对位置(3) + 球旋转(4) + 球线速度(3) + 球角速度(3) = 87
+        expected_obs_dim = 29 * 2 + 3 + 4 + 3 + 3 + 3 + 3 + 4 + 3 + 3  # 87维
+        expected_action_dim = 29
+        
+        # 确保observation_space属性正确设置（如果super().__init__创建时维度为0）
+        import gymnasium.spaces as spaces
+        if hasattr(self, "observation_space"):
+            # 检查当前观察空间维度
+            if hasattr(self.observation_space, "shape") and len(self.observation_space.shape) > 0:
+                current_obs_dim = self.observation_space.shape[0]
+            else:
+                current_obs_dim = 0
+            
+            if current_obs_dim == 0 or current_obs_dim != expected_obs_dim:
+                # 重新创建观察空间
                 self.observation_space = spaces.Box(
                     low=-float("inf"),
                     high=float("inf"),
-                    shape=(actual_obs_dim,),
+                    shape=(expected_obs_dim,),
                     dtype=float,
                 )
-                print(f"[INFO] 观察空间已重新设置为: {self.observation_space.shape}")
+        
+        # 确保action_space属性正确设置
+        if hasattr(self, "action_space"):
+            if hasattr(self.action_space, "shape") and len(self.action_space.shape) > 0:
+                current_action_dim = self.action_space.shape[0]
+            else:
+                current_action_dim = 0
+            
+            if current_action_dim == 0 or current_action_dim != expected_action_dim:
+                self.action_space = spaces.Box(
+                    low=-1.0,
+                    high=1.0,
+                    shape=(expected_action_dim,),
+                    dtype=float,
+                )
 
         # 存储上一帧的球速度（用于计算加速度）
         self._prev_ball_vel = torch.zeros(self.num_envs, 3, device=self.device)
@@ -120,28 +136,40 @@ class G1KickEnv(DirectRLEnv):
 
         # 球体状态
         ball_pos = self.ball.data.root_pos_w - self.scene.env_origins
+        ball_quat = self.ball.data.root_quat_w  # 球的旋转（四元数，4维）
         ball_lin_vel = self.ball.data.root_lin_vel_w
+        ball_ang_vel = self.ball.data.root_ang_vel_w  # 球的角速度（3维）
 
         # 计算球体相对于机器人的位置
         ball_rel_pos = ball_pos - root_pos
 
         # 构建观察向量
-        # 包括：关节位置、关节速度、根位置、根旋转、根速度、球位置、球速度
+        # 包括：关节位置(29) + 关节速度(29) + 根位置(3) + 根旋转(4) + 根线速度(3) + 根角速度(3) 
+        #      + 球绝对位置(3) + 球相对位置(3) + 球旋转(4) + 球线速度(3) + 球角速度(3) 
+        # = 29+29+3+4+3+3+3+3+4+3+3 = 93
         obs = torch.cat(
             [
-                self.joint_pos,  # 关节位置
-                self.joint_vel,  # 关节速度
-                root_pos,  # 根位置
-                root_quat,  # 根旋转（四元数）
-                root_lin_vel,  # 根线速度
-                root_ang_vel,  # 根角速度
-                ball_rel_pos,  # 球相对位置
-                ball_lin_vel,  # 球速度
+                self.joint_pos,  # 关节位置 (29)
+                self.joint_vel,  # 关节速度 (29)
+                root_pos,  # 根位置 (3)
+                root_quat,  # 根旋转（四元数）(4)
+                root_lin_vel,  # 根线速度 (3)
+                root_ang_vel,  # 根角速度 (3)
+                ball_pos,  # 球绝对位置 (3)
+                ball_rel_pos,  # 球相对位置 (3)
+                ball_quat,  # 球旋转（四元数）(4)
+                ball_lin_vel,  # 球线速度 (3)
+                ball_ang_vel,  # 球角速度 (3)
             ],
             dim=-1,
         )
-
         observations = {"policy": obs}
+        
+        # 为AMP训练添加amp_obs到extras（与policy观察相同）
+        # AMP算法需要从infos中获取amp_obs
+        # extras会在step/reset时自动添加到infos中
+        self.extras["amp_obs"] = obs
+        
         return observations
 
     def collect_reference_motions(self, num_samples: int) -> torch.Tensor:
@@ -162,7 +190,6 @@ class G1KickEnv(DirectRLEnv):
 
                 motion_file = Path(self.cfg.motion_file_path)
                 if not motion_file.exists():
-                    print(f"[WARNING] 参考动作文件不存在: {motion_file}")
                     return self._generate_random_states(num_samples)
 
                 # 加载参考动作数据
@@ -190,7 +217,6 @@ class G1KickEnv(DirectRLEnv):
                         else:
                             states = data
                 else:
-                    print(f"[WARNING] 不支持的文件格式: {motion_file.suffix}")
                     return self._generate_random_states(num_samples)
 
                 # 确保状态数据是正确的形状
@@ -199,17 +225,19 @@ class G1KickEnv(DirectRLEnv):
                 elif isinstance(states, torch.Tensor):
                     states = states.float().to(self.device)
                 else:
-                    print(f"[WARNING] 无法处理的状态数据类型: {type(states)}")
                     return self._generate_random_states(num_samples)
 
                 # 确保状态维度匹配观察空间
-                obs_dim = self.observation_space.shape[0] if hasattr(self.observation_space, "shape") else self.cfg.observation_space
+                # 使用固定的87维（G1踢球环境的观察空间维度）
+                obs_dim = 87
+                
                 if states.shape[-1] != obs_dim:
-                    print(
-                        f"[WARNING] 状态维度 ({states.shape[-1]}) 与观察空间维度 ({obs_dim}) 不匹配。"
-                        "将使用随机状态。"
-                    )
                     return self._generate_random_states(num_samples)
+                
+                # 如果维度匹配，确保状态数据是正确的形状
+                if len(states.shape) == 1:
+                    # 如果是1D，扩展为2D
+                    states = states.unsqueeze(0) if isinstance(states, torch.Tensor) else states.reshape(1, -1)
 
                 # 如果状态数据是3D的 (num_frames, num_envs, obs_dim)，展平为2D
                 if len(states.shape) == 3:
@@ -224,12 +252,9 @@ class G1KickEnv(DirectRLEnv):
                     indices = torch.randint(0, states.shape[0], (num_samples,), device=self.device)
                     sampled_states = states[indices]
 
-                print(f"[INFO] 从参考动作数据中收集了 {num_samples} 个状态样本")
                 return sampled_states
 
             except Exception as e:
-                print(f"[WARNING] 加载参考动作数据失败: {e}")
-                print("[WARNING] 将使用随机状态作为参考动作")
                 return self._generate_random_states(num_samples)
         else:
             # 如果没有配置参考动作文件，生成随机状态
@@ -245,10 +270,13 @@ class G1KickEnv(DirectRLEnv):
         Returns:
             states: 形状为 (num_samples, observation_dim) 的张量
         """
-        obs_dim = self.observation_space.shape[0] if hasattr(self.observation_space, "shape") else self.cfg.observation_space
+        # 直接使用配置中的观察空间维度（87维）
+        # 因为这是G1踢球环境的固定观察空间维度
+        obs_dim = 87  # 29(关节位置) + 29(关节速度) + 3(根位置) + 4(根旋转) + 3(根线速度) + 3(根角速度) 
+                      # + 3(球绝对位置) + 3(球相对位置) + 4(球旋转) + 3(球线速度) + 3(球角速度) = 87
+        
         # 生成随机状态（在合理范围内）
         states = torch.randn(num_samples, obs_dim, device=self.device) * 0.1
-        print(f"[INFO] 生成了 {num_samples} 个随机状态样本（观察空间维度: {obs_dim}）")
         return states
 
     def _get_rewards(self) -> torch.Tensor:

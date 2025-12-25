@@ -27,10 +27,11 @@ class G1KickEnvCfg(DirectRLEnvCfg):
 
     # 观察空间和动作空间
     # G1机器人有29个自由度
-    # 观察空间包括：关节位置、关节速度、根位置、根速度、球位置、球速度等
-    # 计算：29(关节位置) + 29(关节速度) + 3(根位置) + 4(根旋转) + 3(根线速度) + 3(根角速度) + 3(球相对位置) + 3(球速度) = 77
+    # 观察空间包括：关节位置(29) + 关节速度(29) + 根位置(3) + 根旋转(4) + 根线速度(3) + 根角速度(3) 
+    #              + 球绝对位置(3) + 球相对位置(3) + 球旋转(4) + 球线速度(3) + 球角速度(3)
+    # = 29 + 29 + 3 + 4 + 3 + 3 + 3 + 3 + 4 + 3 + 3 = 87
     action_space = 29  # 29个自由度的动作
-    observation_space = 77  # 观察空间维度（如果机器人关节数不同，会自动调整）
+    observation_space = 87  # 观察空间维度（87维）
     state_space = 0  # AMP不需要显式状态空间
 
     # 仿真配置
@@ -63,7 +64,7 @@ class G1KickEnvCfg(DirectRLEnvCfg):
 
     # 场景配置
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=4096,  # 并行环境数量
+        num_envs=1024,  # 并行环境数量（从4096减少到1024以节省GPU内存）
         env_spacing=4.0,  # 环境间距
         replicate_physics=True,
     )

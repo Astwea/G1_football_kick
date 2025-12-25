@@ -15,7 +15,7 @@ models:
     network:
       - name: net
         input: OBSERVATIONS
-        layers: [1024, 512, 256]
+        layers: [512, 256]
         activations: relu
     output: ACTIONS
   value:  # see deterministic_model parameters
@@ -24,7 +24,7 @@ models:
     network:
       - name: net
         input: OBSERVATIONS
-        layers: [1024, 512, 256]
+        layers: [512, 256]
         activations: relu
     output: ONE
   discriminator:  # see deterministic_model parameters
@@ -33,7 +33,7 @@ models:
     network:
       - name: net
         input: OBSERVATIONS
-        layers: [1024, 512, 256]
+        layers: [512, 256]
         activations: relu
     output: ONE
 
@@ -47,13 +47,13 @@ memory:
 # https://skrl.readthedocs.io/en/latest/api/memories/random.html
 motion_dataset:
   class: RandomMemory
-  memory_size: 200000
+  memory_size: 5000  # 减少内存使用（从200000减少到50000）
 
 # AMP memory (preventing discriminator overfitting)
 # https://skrl.readthedocs.io/en/latest/api/memories/random.html
 reply_buffer:
   class: RandomMemory
-  memory_size: 1000000
+  memory_size: 5000  # 减少内存使用（从1000000减少到50000，适合小GPU）
 
 # AMP agent configuration (field names are from AMP_DEFAULT_CONFIG)
 # https://skrl.readthedocs.io/en/latest/api/agents/amp.html
@@ -88,7 +88,7 @@ agent:
   # style_reward_weight: 动作模仿奖励权重（AMP判别器）
   task_reward_weight: 0.3
   style_reward_weight: 0.7
-  discriminator_batch_size: 4096
+  discriminator_batch_size: 1024  # 减少批次大小以节省GPU内存（从4096减少到1024）
   discriminator_reward_scale: 2.0
   discriminator_logit_regularization_scale: 0.05
   discriminator_gradient_penalty_scale: 5.0
