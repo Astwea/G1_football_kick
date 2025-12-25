@@ -17,6 +17,11 @@ It allows you to develop in an isolated environment, outside of the core Isaac L
 - Install Isaac Lab by following the [installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html).
   We recommend using the conda or uv installation as it simplifies calling Python scripts from the terminal.
 
+- **Important**: Isaac Lab requires NumPy < 2.0. If you have NumPy 2.x installed, downgrade it first:
+  ```bash
+  pip install "numpy<2.0"
+  ```
+
 - Clone or copy this project/repository separately from the Isaac Lab installation (i.e. outside the `IsaacLab` directory):
 
 - Using a python interpreter that has Isaac Lab installed, install the library in editable mode using:
@@ -133,3 +138,14 @@ Some examples of packages that can likely be excluded are:
 "<path-to-isaac-sim>/extscache/omni.services.*"     // Services tools
 ...
 ```
+
+### NumPy Version Compatibility
+
+If you encounter errors like `AttributeError: _ARRAY_API not found` or warnings about NumPy version incompatibility:
+
+```bash
+# Isaac Lab requires NumPy < 2.0
+pip install "numpy<2.0"
+```
+
+This is because Isaac Lab and its dependencies (like `nlopt`) are compiled against NumPy 1.x and are not compatible with NumPy 2.x.# G1_football_kick
